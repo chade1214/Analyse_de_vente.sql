@@ -1,0 +1,126 @@
+CREATE VIEW SalesPerformance AS
+SELECT 
+    s.CarrierTrackingNumber,   -- Identifiant unique de la commande
+    s.OrderDate,   -- Date de la commande
+    s.ShipDate,   -- Date d'expédition
+    p.EnglishProductName AS ProductName,  -- Nom du produit
+    c.FirstName + ' ' + c.LastName AS CustomerName,   -- Nom complet du client
+    t.SalesTerritoryRegion AS Region,   -- Région de vente
+    SUM(s.OrderQuantity) AS TotalQuantitySold,
+    -- Calcul du montant total des ventes (SalesAmount est déja une colonne disponible)
+    SUM(s.SalesAmount) AS TotalSales,
+    -- Calcul du cout total des produits
+    SUM(s.TotalProductCost) AS TotalProductCost,
+    -- Calcul du profit total
+    SUM(s.SalesAmount - s.TotalProductCost) AS TotalProfit,
+    -- Calcul du montant total des remises
+    SUM(s.DiscountAmount) AS TotalDiscountAmount,
+    -- Classer les produits en fonction de la performance
+    CASE 
+        WHEN SUM(s.SalesAmount) > 100000 THEN 'Top Performer'
+        WHEN SUM(s.SalesAmount) BETWEEN 50000 AND 100000 THEN 'Average Performer'
+        ELSE 'Low Performer'
+    END AS PerformanceCategory
+FROM 
+    dbo.FactInternetSales s
+    INNER JOIN dbo.DimProduct p ON s.ProductKey = p.ProductKey
+    INNER JOIN dbo.DimCustomer c ON s.CustomerKey = c.CustomerKey
+    INNER JOIN dbo.DimSalesTerritory t ON s.SalesTerritoryKey = t.SalesTerritoryKey
+GROUP BY 
+    s.CarrierTrackingNumber,  -- Utilisation comme identifiant unique
+    s.OrderDate,
+    s.ShipDate,
+    p.EnglishProductName, 
+    c.FirstName, 
+    c.LastName, 
+    t.SalesTerritoryRegion;
+
+ --Analyse des Tendances avec des Fonctions de Fenétre
+	SELECT 
+    ProductName,
+    Region,
+    OrderDate,
+    SUM(TotalSales) AS MonthlySales,
+    LAG(SUM(TotalSales), 1) OVER (PARTITION BY ProductName, Region ORDER BY YEAR(OrderDate), MONTH(OrderDate)) AS PreviousMonthSales,
+    (SUM(TotalSales) - LAG(SUM(TotalSales), 1) OVER (PARTITION BY ProductName, Region ORDER BY YEAR(OrderDate), MONTH(OrderDate))) / 
+    NULLIF(LAG(SUM(TotalSales), 1) OVER (PARTITION BY ProductName, Region ORDER BY YEAR(OrderDate), MONTH(OrderDate)), 0) * 100 AS SalesChangePercentage
+FROM 
+    SalesPerformance
+GROUP BY 
+    ProductName, 
+    Region, 
+    OrderDate,  -- Ajout d'OrderDate dans le GROUP BY
+    YEAR(OrderDate), 
+    MONTH(OrderDate);
+
+	
+	--Création de Rapports Dynamiques
+	SELECT 
+    ProductName,
+    Region,
+    COUNT(*) AS NumberOfSales,
+    SUM(TotalQuantitySold) AS TotalQuantitySold,
+    SUM(TotalSales) AS TotalSales,
+    SUM(TotalProfit) AS TotalProfit,
+    AVG(TotalSales) AS AverageSalesPerOrder,
+    MAX(TotalSales) AS HighestSingleSale,
+    MIN(TotalSales) AS LowestSingleSale
+FROM 
+    SalesPerformance
+GROUP BY 
+    ProductName, 
+    Region
+ORDER BY 
+    TotalSales DESC;
+	
+	--Rapport des Ventes par Mois et par Produit
+	SELECT 
+    ProductName,
+    YEAR(OrderDate) AS Year,
+    MONTH(OrderDate) AS Month,
+    SUM(TotalSales) AS MonthlySales,
+    SUM(TotalProfit) AS MonthlyProfit,
+    SUM(TotalDiscountAmount) AS MonthlyDiscounts
+FROM 
+    SalesPerformance
+GROUP BY 
+    ProductName, 
+    YEAR(OrderDate), 
+    MONTH(OrderDate)
+ORDER BY 
+    ProductName, 
+    Year, 
+    Month;
+-- Tableau de Bord des Indicateurs Clés (KPI)
+	SELECT 
+    COUNT(DISTINCT CustomerName) AS TotalCustomers,
+    SUM(TotalSales) AS TotalRevenue,
+    SUM(TotalProfit) AS TotalProfit,
+    AVG(TotalSales) AS AverageOrderValue,
+    MAX(TotalSales) AS HighestOrderValue,
+    MIN(TotalSales) AS LowestOrderValue
+FROM 
+    SalesPerformance;
+	--Optimisation des Requétes
+--Indexation des Colonnes Clés
+	CREATE INDEX IDX_OrderDate ON dbo.FactInternetSales(OrderDate);
+CREATE INDEX IDX_ProductKey ON dbo.FactInternetSales(ProductKey);
+CREATE INDEX IDX_CustomerKey ON dbo.FactInternetSales(CustomerKey);
+CREATE INDEX IDX_SalesTerritoryKey ON dbo.FactInternetSales(SalesTerritoryKey);
+
+-- Créer une table persistante pour stocker les résultats
+SELECT 
+   
+    ProductName,
+    Region,
+    SUM(TotalSales) AS TotalSales,
+    SUM(TotalProfit) AS TotalProfit,
+    AVG(TotalSales) AS AverageSalesPerOrder
+INTO SalesPerformanceSummary
+FROM 
+    SalesPerformance
+GROUP BY 
+    ProductName, 
+    Region;
+
+SELECT * FROM SalesPerformance
